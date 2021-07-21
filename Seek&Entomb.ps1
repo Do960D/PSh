@@ -1,6 +1,6 @@
 ﻿#Before we start catch this
-$Entombment = 'OU=moved,DC=Dom,DC=local'
-$HereWeHunt = 'OU=Регионы,DC=Dom,DC=local'
+$Entombment = 'OU=RIP,DC=Dom,DC=local'
+$HereWeHunt = 'OU=PROD,DC=Dom,DC=local'
 $DecayDate = (Get-Date).addDays(-90) 
 $PerceiveAsANewBorn = (Get-Date).addDays(-30)
 
