@@ -1,9 +1,9 @@
 $VerbosePreference = "SilentlyContinue"
 
-#задержка
+# Задержка
 $pauseDuration = 5
 
-#получаем описание служб
+# Получаем описание служб
 function Get-ServiceCommandLine {
     param (
         [string]$executableName
@@ -11,7 +11,7 @@ function Get-ServiceCommandLine {
 
     $result = @()
 
-    #Переберает службы, пока не найдет ту, что указана в аргументах как executableName
+    # Перебирает службы, пока не найдет ту, что указана в аргументах как executableName
     $services = Get-WmiObject Win32_Service | Where-Object {$_.PathName -like "*$executableName*"}
     foreach ($service in $services) {
         $serviceInfo = @{
@@ -25,7 +25,7 @@ function Get-ServiceCommandLine {
     return $result
 }
 
-#выделяем из строки нужный фрагмент
+# Выделяем из строки нужный фрагмент
 function Get-StringFragment {
     param (
         [string]$inputString,
@@ -36,7 +36,7 @@ function Get-StringFragment {
     return $dValue
 }
 
-#останавливаем экземпляр службы по имени
+# Останавливаем экземпляр службы по имени
 function Stop-Services {
     param (
         [string]$serviceName,
@@ -46,15 +46,13 @@ function Stop-Services {
     try {
         Get-Service -Name $serviceName | Stop-Service
     }
-
     catch {
-            Write-Host "error: $_"
-            exit
-        
+        Write-Host "error: $_"
+        exit
     }
 }
 
-#стартуем службы
+# Стартуем службы
 function Start-Services {
     param (
         [string]$serviceName
@@ -62,11 +60,11 @@ function Start-Services {
     Get-Service -Name $serviceName | Start-Service   
 }
 
-#внутри folderPath ищем папки подходящие по имени target, в них защичаем файлы кроме exception - потом все пустые подкаталоги удаляем
+# Внутри folderPath ищем папки подходящие по имени target, в них защищаем файлы кроме exception - потом все пустые подкаталоги удаляем
 function Clear-Folder {
     param([string] $folderPath,
           [string] $target,
-               [string] $exception=@(".lst") #это массив, можно аля так @(".lst", ".ini", ...)
+          [string] $exception=@(".lst") # это массив, можно аля так @(".lst", ".ini", ...)
     ) 
 
     Write-Host "Clear folder: $folderPath\*\$target"
@@ -88,89 +86,104 @@ function DeleteFolderIfWithoutFiles {
 
     # Удаление пустых подкаталогов
     if ((Get-ChildItem -Path $folderPath -Recurse -File | Measure-Object).Count -eq 0) {
-
-        Remove-Item -Path $_.FullName -Force -Recurse
-        Write-Host " - delete emtpy folder: $folderPath"}
+        Remove-Item -Path $folderPath -Force -Recurse
+        Write-Host " - delete empty folder: $folderPath"
+    }
     else {
-        Write-Host " - folder have files: $folderPath"
+        Write-Host " - folder has files: $folderPath"
     }
 }
 
-#------------------------------------------------------------------------------------
-#- ОСНОВНОЙ СКРИПТ ------------------------------------------------------------------
-#------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------
+# - ОСНОВНОЙ СКРИПТ ------------------------------------------------------------------
+# ------------------------------------------------------------------------------------
 
-    $serviceRAS = Get-ServiceCommandLine -executableName "ras.exe"
-    foreach ($service in $serviceRAS) {
-        $serviceName = $service.ServiceName
-        Stop-Services -serviceName $serviceName
-        Start-Sleep -Seconds $pauseDuration
+# Запрос порта с таймаутом
+$port = $null
+$timeout = 15
+$timer = [System.Diagnostics.Stopwatch]::StartNew()
+
+Write-Host "Введите порт (или нажмите Enter для продолжения):"
+$inputTask = Start-Job -ScriptBlock {
+    $portInput = Read-Host "Введите порт"
+    return $portInput
+}
+
+while ($timer.Elapsed.TotalSeconds -lt $timeout) {
+    if ($inputTask.HasExited) {
+        $port = $inputTask.Receive()
+        Stop-Job $inputTask
+        break
+    }
+    Start-Sleep -Milliseconds 500
+}
+
+if ($port -eq $null) {
+    Write-Host "Ввод не получен, продолжаем выполнение скрипта без изменения портов."
+} else {
+    Write-Host "Выбранный порт: $port"
+}
+
+$serviceRAS = Get-ServiceCommandLine -executableName "ras.exe"
+foreach ($service in $serviceRAS) {
+    $serviceName = $service.ServiceName
+    Stop-Services -serviceName $serviceName
+    Start-Sleep -Seconds $pauseDuration
+}
+
+$service1C = Get-ServiceCommandLine -executableName "ragent.exe"
+foreach ($service in $service1C) {
+    $serviceName = $service.ServiceName
+    Stop-Services -serviceName $serviceName
+    Start-Sleep -Seconds $pauseDuration
+}
+
+foreach ($service in $service1C) {
+    $serviceWorkFolder = Get-StringFragment -inputString $service.PathToExecutable -regularExpression '-d "(.*?)"'
+
+    # Чистим сеансовые данные служб 1С
+    try {
+        Clear-Folder -folderPath $serviceWorkFolder -target "snccntx*"
+    }
+    catch {
+        Write-Host "error: $_"
+        exit
     }
 
-    
-
-    $service1C = Get-ServiceCommandLine -executableName "ragent.exe"
-    foreach ($service in $service1C) {
-        $serviceName = $service.ServiceName
-        Stop-Services -serviceName $serviceName
-        Start-Sleep -Seconds $pauseDuration
+    # Чистим журнал
+    try {
+        Clear-Folder -folderPath $serviceWorkFolder -target "1Cv8Log"
+    }
+    catch {
+        Write-Host "error: $_"
+        exit
     }
 
-    
-
-    foreach ($service in $service1C) {
-        $serviceWorkFolder = Get-StringFragment -inputString $service.PathToExecutable -regularExpression '-d "(.*?)"'
-
-        #чистим сеансовые данные служб 1с
-        try{
-            Clear-Folder -folderPath $serviceWorkFolder -target "snccntx*"
-        }
-       
-        catch {
-            Write-Host "error: $_"
-            exit
-        }
-        
-        #чистим журнал
-    
-        
-        try{
-            Clear-Folder -folderPath $serviceWorkFolder -target "1Cv8Log"
-        }
-       
-        catch {
-            Write-Host "error: $_"
-            exit
-        }
-
-        #чистим журнал
-        
-        try{
-            Clear-Folder -folderPath $serviceWorkFolder -target "1Cv8FTxt*"
-        }
-       
-        catch {
-            Write-Host "error: $_"
-            exit
-        }
-
-        #найдем каталоги по маске guid и зачистим если они пустые
-        $guidPattern = '^[{(]?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}[)}]?$'
-        Get-ChildItem -Path $serviceWorkFolder -Directory -Recurse | Where-Object { $_.Name -match $guidPattern } | ForEach-Object {
-            DeleteFolderIfWithoutFiles $_.FullName
-        }
+    # Чистим журнал
+    try {
+        Clear-Folder -folderPath $serviceWorkFolder -target "1Cv8FTxt*"
+    }
+    catch {
+        Write-Host "error: $_"
+        exit
     }
 
-#стартуем службы 1с
-    foreach ($service in $service1C) {
-        $serviceName = $service.ServiceName
-        Start-Services -serviceName $serviceName
-        Start-Sleep -Seconds $pauseDuration
+    # Найдем каталоги по маске guid и зачистим если они пустые
+    $guidPattern = '^[{(]?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}[)}]?$'
+    Get-ChildItem -Path $serviceWorkFolder -Directory -Recurse | Where-Object { $_.Name -match $guidPattern } | ForEach-Object {
+        DeleteFolderIfWithoutFiles $_.FullName
     }
+}
 
+# Стартуем службы 1С
+foreach ($service in $service1C) {
+    $serviceName = $service.ServiceName
+    Start-Services -serviceName $serviceName
+    Start-Sleep -Seconds $pauseDuration
+}
 
-    #стартуем службы ras
-    foreach ($service in $serviceRAS) {
-        $serviceName = $service.ServiceName
-        Start-Services -serviceName $serviceName
-    }
+# Стартуем службы ras
+foreach ($service in $serviceRAS) {
+    $serviceName = $service.ServiceName
+    Start-Services -serviceName $serviceName
+}
